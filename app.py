@@ -78,6 +78,8 @@ def webhook():
             except: send_whatsapp(from_num, "שלח מספר בלבד, לדוגמה 87")
     except Exception as e: print(e)
     return "ok",200
+    if __name__=="__main__":
+        
 @app.route('/privacy')
 def privacy():
     return """
@@ -92,5 +94,4 @@ def privacy():
 @app.route('/')
 def home():
     return 'Budget Bot is running - Privacy at /privacy'
-    if __name__=="__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT",10000)))
