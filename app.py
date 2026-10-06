@@ -1,97 +1,96 @@
-from flask import Flask, request
+from flask import Flask, request, jsonify
 import os
+import requests
+
 app = Flask(__name__)
-VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN", "budget1234")
+
+# זה הטוקן שאתה שם בפייסבוק
+VERIFY_TOKEN = "budget1234"
+
+# תמלא כאן את הטוקנים שלך אחר כך אם צריך - בינתיים הבוט יחזיר תשובה פשוטה
 WHATSAPP_TOKEN = os.environ.get("WHATSAPP_TOKEN", "")
 PHONE_NUMBER_ID = os.environ.get("PHONE_NUMBER_ID", "")
-BUDGET = {"קניות ומזון": {"budget": 3000, "businesses": ["רמי לוי קבוצה", "מענדי", "טלר", "פניני טבע", "שאול תמרוקים"]}, "מגורים וחינוך": {"budget": 4770, "businesses": ["חשמל", "מעון", "ארנונה", "גן אברהם", "ועד לפיד", "מקווה"]}, "רכב ותחבורה": {"budget": 2525, "businesses": ["ביטוח רכב", "דלק", "מוניות", "חניונים ורב קו", "פיקדון טסט"]}, "מעשרות וקודש": {"budget": 2000, "businesses": ["בית חבד לפיד", "שניאור ושיינא סגל", "אסי וטל פישמן", "חבד זמביה", "חבד וינה", "רפאל סלבר", "צארידי"]}, "ביגוד, בריאות וסגנון חיים": {"budget": 1600, "businesses": ["מכנסיים", "עדשות", "נקסט", "כרית להריון", "משקפיים", "יציאות", "אפילוגיק"]}, "שונות": {"budget": 500, "businesses": ["שונות"]}, "תקשורת ומנויים": {"budget": 549, "businesses": ["בזק", "משפחה", "כפר חבד", "רימון", "דבר מלכות", "מיקרוסופט"]}, "ביטוחים": {"budget": 150, "businesses": ["ביטוח חיים"]}}
-BUDGET_LIST = list(BUDGET.keys())
-users = {}
-spent_db = {}
-def send_whatsapp(to, text):
-    import requests
-    url = f"https://graph.facebook.com/v20.0/{PHONE_NUMBER_ID}/messages"
-    headers = {"Authorization": f"Bearer {WHATSAPP_TOKEN}", "Content-Type": "application/json"}
-    data = {"messaging_product": "whatsapp", "to": to, "type": "text", "text": {"body": text}}
-    try: requests.post(url, headers=headers, json=data)
-    except: pass
-@app.route("/")
-def home(): return "Bot Running"
-@app.route("/webhook", methods=["GET"])
-def verify():
-    if request.args.get("hub.verify_token") == VERIFY_TOKEN:
-        return request.args.get("hub.challenge"), 200
-    return "fail", 403
-@app.route("/webhook", methods=["POST"])
-def webhook():
-    data = request.get_json()
-    try:
-        val = data['entry'][0]['changes'][0]['value']
-        if 'messages' not in val: return "ok", 200
-        msg = val['messages'][0]
-        from_num = msg['from']
-        text = msg.get('text', {}).get('body','').strip()
-        if from_num not in users:
-            users[from_num] = {"step":"cat"}
-            spent_db[from_num] = {}
-        state = users[from_num]
-        if text in ["היי","שלום","התחלה","תפריט","hi","menu","0","הי"]:
-            state["step"]="cat"
-            txt="🛒 *בוט התקציב לפיד* - 15,151₪\nבחר קטגוריה:\n"
-            for i,c in enumerate(BUDGET_LIST,1): txt+=f"{i}. {c} ({BUDGET[c]['budget']}₪)\n"
-            txt+="\nשלח גם 'יתרה' לדוח"
-            send_whatsapp(from_num, txt)
-            return "ok",200
-        if text in ["יתרה","דוח","מצב"]:
-            total_spent = sum(sum(d.values()) for d in spent_db[from_num].values())
-            txt=f"📊 *דוח תקציב*\nהוצאת: {total_spent}₪\nנשאר: {15151-total_spent}₪ / 15151₪\n\n"
-            for cat in BUDGET_LIST:
-                cs = sum(spent_db[from_num].get(cat, {}).values())
-                txt+=f"{cat}: {cs}/{BUDGET[cat]['budget']}₪\n"
-            send_whatsapp(from_num, txt)
-            return "ok",200
-        if state["step"]=="cat":
-            try:
-                cat = BUDGET_LIST[int(text)-1]
-                state["cat"]=cat
-                state["step"]="biz"
-                txt=f"*{cat}* - בחר עסק:\n"
-                for i,b in enumerate(BUDGET[cat]["businesses"],1): txt+=f"{i}. {b}\n"
-                send_whatsapp(from_num, txt)
-            except: send_whatsapp(from_num, "מספר לא תקין, נסה שוב")
-        elif state["step"]=="biz":
-            try:
-                biz = BUDGET[state["cat"]]["businesses"][int(text)-1]
-                state["biz"]=biz
-                state["step"]="amount"
-                send_whatsapp(from_num, f"כמה הוצאת ב-{biz}? שלח סכום, לדוגמה: 87")
-            except: send_whatsapp(from_num, "מספר לא תקין")
-        elif state["step"]=="amount":
-            try:
-                amount = float(text.replace("₪",""))
-                cat=state["cat"]; biz=state["biz"]
-                if cat not in spent_db[from_num]: spent_db[from_num][cat]={}
-                spent_db[from_num][cat][biz]=spent_db[from_num][cat].get(biz,0)+amount
-                total = sum(sum(d.values()) for d in spent_db[from_num].values())
-                send_whatsapp(from_num, f"✅ עודכן {amount}₪ ב-{biz}\nנשאר כללי: {15151-total}₪\nשלח 'תפריט' להמשך")
-                state["step"]="cat"
-            except: send_whatsapp(from_num, "שלח מספר בלבד, לדוגמה 87")
-    except Exception as e: print(e)
-    return "ok",200
-    if __name__=="__main__":
-        
-@app.route('/privacy')
-def privacy():
-    return """
-    <h1>Privacy Policy - Budget Bot</h1>
-    <p>This WhatsApp bot helps users manage monthly budget.</p>
-    <p>We do not share personal data with third parties. Messages are processed only to provide budget tracking.</p>
-    <p>Data is stored securely per user phone number and is not sold.</p>
-    <p>Contact: budget bot support</p>
-    <p>Effective date: October 2025</p>
-    """
 
+# --- דפים שפייסבוק דורש כדי לאשר ---
 @app.route('/')
 def home():
     return 'Budget Bot is running - Privacy at /privacy'
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT",10000)))
+
+@app.route('/privacy')
+def privacy():
+    return """
+    <html>
+    <head><title>Privacy Policy</title></head>
+    <body style="font-family:Arial; max-width:700px; margin:40px auto; line-height:1.6;">
+        <h1>Privacy Policy - Budget Bot</h1>
+        <p><b>What we do:</b> This WhatsApp bot helps users manage monthly budget tracking.</p>
+        <p><b>Data collected:</b> Phone number and messages you send to the bot (expenses).</p>
+        <p><b>How we use it:</b> Only to calculate and show your budget. We do not share, sell, or transfer your data to third parties.</p>
+        <p><b>Storage:</b> Data is stored securely and linked to your phone number only.</p>
+        <p><b>Deletion:</b> You can request deletion by sending "delete my data".</p>
+        <p><b>Contact:</b> For privacy questions contact the bot owner.</p>
+        <p>Effective date: October 2025</p>
+    </body>
+    </html>
+    """
+
+# --- ה-Webhook של וואטסאפ ---
+@app.route('/webhook', methods=['GET'])
+def verify_webhook():
+    mode = request.args.get("hub.mode")
+    token = request.args.get("hub.verify_token")
+    challenge = request.args.get("hub.challenge")
+    
+    if mode == "subscribe" and token == VERIFY_TOKEN:
+        print("WEBHOOK VERIFIED!")
+        return challenge, 200
+    else:
+        return "Verification failed", 403
+
+@app.route('/webhook', methods=['POST'])
+def handle_message():
+    data = request.get_json()
+    print("Incoming message:", data)
+
+    # לוגיקה בסיסית - מחזיר "היי" בחזרה
+    try:
+        if data and data.get("object"):
+            for entry in data.get("entry", []):
+                for change in entry.get("changes", []):
+                    value = change.get("value", {})
+                    messages = value.get("messages", [])
+                    if messages:
+                        for msg in messages:
+                            from_number = msg.get("from")
+                            text = msg.get("text", {}).get("body", "")
+                            print(f"Message from {from_number}: {text}")
+                            
+                            # כאן תשלח תשובה חזרה אם יש לך טוקן
+                            if WHATSAPP_TOKEN and PHONE_NUMBER_ID and from_number:
+                                send_whatsapp_message(from_number, f"קיבלתי: {text} - הבוט שלך עובד! 🎉")
+    except Exception as e:
+        print("Error:", e)
+
+    return "OK", 200
+
+def send_whatsapp_message(to, text):
+    url = f"https://graph.facebook.com/v20.0/{PHONE_NUMBER_ID}/messages"
+    headers = {
+        "Authorization": f"Bearer {WHATSAPP_TOKEN}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": to,
+        "type": "text",
+        "text": {"body": text}
+    }
+    try:
+        r = requests.post(url, headers=headers, json=payload)
+        print("Send response:", r.text)
+    except Exception as e:
+        print("Send error:", e)
+
+if __name__ == '__main__':
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host='0.0.0.0', port=port)
